@@ -1,0 +1,95 @@
+name: Test, Build, Deploy and Release
+on: 
+  push
+
+jobs:
+  test_and_build:
+    runs-on: ubuntu-latest
+
+    container:
+      image: google/dart:latest
+
+    steps:
+    - uses: actions/checkout@v1
+      
+    - name: Install dependencies
+      working-directory: jps_visualiser
+      run: pub get && pub global activate webdev
+      
+    #- name: Run tests
+    #  working-directory: jps_visualiser
+    #  run: pub run test
+      
+    - name: Run build
+      working-directory: jps_visualiser
+      run: pub global run webdev build --output build
+
+    - name: Upload
+      uses: actions/upload-artifact@v1
+      with:
+        name: web
+        path: jps_visualiser/build/web
+  
+  deploy:
+    needs: [test_and_build]
+    if: success() && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v1
+      
+      - name: Download
+        uses: actions/download-artifact@v1
+        with:
+          name: web
+
+      - if: github.ref == 'refs/heads/develop'
+        run: mkdir -p deploy/develop/ && mv web/* deploy/develop/
+
+      - if: github.ref == 'refs/heads/master'
+        run: mkdir deploy/ && mv web/* deploy/
+
+      - name: Deploy
+        uses: JamesIves/github-pages-deploy-action@releases/v3
+        with:
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          BRANCH: gh-pages
+          FOLDER: deploy
+  
+  release:
+    needs: [deploy]
+    if: success() && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Download
+        uses: actions/download-artifact@v1
+        with:
+          name: web
+
+      - run: zip -r release.zip web
+          
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v0.9.0-beta
+          release_name: Release
+          body: |
+            Changes in this Release
+            - First Change
+            - Second Change
+          draft: true
+          prerelease: true
+
+      - name: Add Release Asset
+        uses: actions/upload-release-asset@v1.0.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release.zip
+          asset_name: GridSearchVisualiser-v0.9.0-beta.zip
+          asset_content_type: application/zip
